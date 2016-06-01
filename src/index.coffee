@@ -29,16 +29,17 @@ module.exports = class Exoid
 
       @_cacheSet key, @_streamResult req, result
 
-  _cacheRefs: (result) -> null
+  _cacheRefs: (result) =>
     # top level refs only
-    # resources = if _.isArray(result) then result else [result]
-    #
-    # _.map resources, (resource) =>
-    #   if resource?.id?
-    #     unless uuidRegex.test resource.id
-    #       throw new Error 'ids must be uuid'
-    #     key = stringify {path: resource.id}
-    #     @_cacheSet key, Rx.Observable.just resource
+    resources = if _.isArray(result) then result else [result]
+
+    _.map resources, (resource) =>
+      if resource?.id?
+        unless uuidRegex.test resource.id
+          throw new Error 'ids must be uuid'
+        embedded = resource.embedded or []
+        key = stringify {path: resource.id, embedded: embedded}
+        @_cacheSet key, Rx.Observable.just resource
 
   _streamResult: (req, result) =>
     resources = if _.isArray(result) then result else [result]
@@ -46,7 +47,9 @@ module.exports = class Exoid
       if resource?.id?
         unless uuidRegex.test resource.id
           throw new Error 'ids must be uuid'
-        @_cache[stringify {path: resource.id}].stream
+        embedded = resource.embedded or []
+        resourceKey = stringify {path: resource.id, embedded: embedded}
+        @_cache[resourceKey].stream
       else
         null
 
@@ -152,7 +155,7 @@ module.exports = class Exoid
   stream: (path, body) =>
     req = {path, body}
     key = stringify req
-    resourceKey = stringify {path: body}
+    resourceKey = stringify {path: body, embedded: []}
 
     if @_cache[key]?
       return @_cache[key].stream
