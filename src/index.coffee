@@ -29,16 +29,16 @@ module.exports = class Exoid
 
       @_cacheSet key, @_streamResult req, result
 
-  _cacheRefs: (result) =>
+  _cacheRefs: (result) -> null
     # top level refs only
-    resources = if _.isArray(result) then result else [result]
-
-    _.map resources, (resource) =>
-      if resource?.id?
-        unless uuidRegex.test resource.id
-          throw new Error 'ids must be uuid'
-        key = stringify {path: resource.id}
-        @_cacheSet key, Rx.Observable.just resource
+    # resources = if _.isArray(result) then result else [result]
+    #
+    # _.map resources, (resource) =>
+    #   if resource?.id?
+    #     unless uuidRegex.test resource.id
+    #       throw new Error 'ids must be uuid'
+    #     key = stringify {path: resource.id}
+    #     @_cacheSet key, Rx.Observable.just resource
 
   _streamResult: (req, result) =>
     resources = if _.isArray(result) then result else [result]
