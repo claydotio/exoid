@@ -152,12 +152,12 @@ module.exports = class Exoid
     else
       Promise.resolve null
 
-  stream: (path, body) =>
+  stream: (path, body, {ignoreCache} = {}) =>
     req = {path, body}
     key = stringify req
     resourceKey = stringify {path: body, embedded: []}
 
-    if @_cache[key]?
+    if @_cache[key]? and not ignoreCache
       return @_cache[key].stream
 
     if _.isString(body) and uuidRegex.test(body) and @_cache[resourceKey]?
@@ -169,7 +169,11 @@ module.exports = class Exoid
       @_cacheSet key, stream
       return @_cache[key].stream
 
-    @_cacheSet key, @_deferredRequestStream req
+    stream = @_deferredRequestStream req
+    if ignoreCache
+      return stream
+
+    @_cacheSet key, stream
     return @_cache[key].stream
 
   call: (path, body) =>
