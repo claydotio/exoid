@@ -181,8 +181,8 @@ module.exports = class Exoid
     key = stringify req
 
     stream = @_deferredRequestStream req, true
-    return stream.take(1).toPromise().then (result) =>
-      @_cacheSet key, Rx.Observable.just result
+    return stream.take(1).toPromise().then (result) ->
+      # @_cacheSet key, Rx.Observable.just result
       return result
 
   update: (result) =>
