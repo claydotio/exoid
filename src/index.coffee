@@ -152,7 +152,7 @@ module.exports = class Exoid
     else
       Promise.resolve null
 
-  stream: (path, body, {ignoreCache, isErrorable} = {}) =>
+  stream: (path, body, {ignoreCache} = {}) =>
     req = {path, body}
     key = stringify req
     resourceKey = stringify {path: body, embedded: []}
@@ -169,7 +169,7 @@ module.exports = class Exoid
       @_cacheSet key, stream
       return @_cache[key].stream
 
-    stream = @_deferredRequestStream req, Boolean isErrorable
+    stream = @_deferredRequestStream req
     if ignoreCache
       return stream
 
