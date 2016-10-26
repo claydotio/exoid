@@ -129,7 +129,8 @@ module.exports = class Exoid
       _.map _.zip(queue, results, errors),
       ([{req, resStreams, isErrorable}, result, error]) =>
         if isErrorable and error?
-          properError = new Error "#{JSON.stringify error}"
+          properError = new Error error.info
+          properError.status = error.status
           resStreams.onError _.defaults properError, error
         else if not error?
           resStreams.onNext @_streamResult req, result
