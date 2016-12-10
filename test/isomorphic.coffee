@@ -1,6 +1,7 @@
 require './polyfill'
 
-_ = require 'lodash'
+_isPlainObject = require 'lodash/isPlainObject'
+_keys = require 'lodash/keys'
 b = require 'b-assert'
 log = require 'loga'
 zock = require 'zock'
@@ -355,16 +356,16 @@ it 'expsoes cache stream', ->
     .then ->
       cache.take(1).toPromise()
     .then (cache) ->
-      b _.isPlainObject cache
-      b _.keys(cache).length, 2
+      b _isPlainObject cache
+      b _keys(cache).length, 2
     .then ->
       exo.stream 'users.next'
       .take(1).toPromise()
     .then ->
       cache.take(1).toPromise()
     .then (cache) ->
-      b _.isPlainObject cache
-      b _.keys(cache).length, 3
+      b _isPlainObject cache
+      b _keys(cache).length, 3
 
 it 'allows initializing from cache', ->
   requestCnt = 0

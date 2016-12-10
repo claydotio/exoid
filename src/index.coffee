@@ -1,4 +1,14 @@
-_ = require 'lodash'
+_map = require 'lodash/map'
+_isArray = require 'lodash/isArray'
+_filter = require 'lodash/filter'
+_isEmpty = require 'lodash/isEmpty'
+_some = require 'lodash/some'
+_isUndefined = require 'lodash/isUndefined'
+_find = require 'lodash/find'
+_transform = require 'lodash/transform'
+_zip = require 'lodash/zip'
+_defaults = require 'lodash/defaults'
+_isString = require 'lodash/isString'
 Rx = require 'rx-lite'
 log = require 'loga'
 stringify = require 'json-stable-stringify'
@@ -19,9 +29,9 @@ module.exports = class Exoid
 
     @io.on 'disconnect', @invalidateAll
 
-    _.map cache, @_cacheRefs
+    _map cache, @_cacheRefs
 
-    _.map cache, (result, key) =>
+    _map cache, (result, key) =>
       req = JSON.parse key
 
       isResource = uuidRegex.test req.path
@@ -32,9 +42,9 @@ module.exports = class Exoid
 
   _cacheRefs: (result) =>
     # top level refs only
-    resources = if _.isArray(result) then result else [result]
+    resources = if _isArray(result) then result else [result]
 
-    _.map resources, (resource) =>
+    _map resources, (resource) =>
       if resource?.id?
         unless uuidRegex.test resource.id
           throw new Error 'ids must be uuid'
@@ -43,8 +53,8 @@ module.exports = class Exoid
         @_cacheSet key, Rx.Observable.just resource
 
   _streamResult: (req, result) =>
-    resources = if _.isArray(result) then result else [result]
-    refs = _.filter _.map resources, (resource) =>
+    resources = if _isArray(result) then result else [result]
+    refs = _filter _map resources, (resource) =>
       if resource?.id?
         unless uuidRegex.test resource.id
           throw new Error 'ids must be uuid'
@@ -54,20 +64,20 @@ module.exports = class Exoid
       else
         null
 
-    stream = (if _.isEmpty(refs) then Rx.Observable.just []
+    stream = (if _isEmpty(refs) then Rx.Observable.just []
     else Rx.Observable.combineLatest(refs)
     ).flatMapLatest (refs) =>
       # if a sub-resource is invalidated (deleted), re-request
-      if _.some refs, _.isUndefined
+      if _some refs, _isUndefined
         return @_deferredRequestStream req
 
       Rx.Observable.just \
-      if _.isArray result
-        _.map result, (resource) ->
-          ref = _.find refs, {id: resource?.id}
+      if _isArray result
+        _map result, (resource) ->
+          ref = _find refs, {id: resource?.id}
           if ref? then ref else resource
       else
-        ref = _.find refs, {id: result?.id}
+        ref = _find refs, {id: result?.id}
         if ref? then ref else result
 
     return stream
@@ -81,7 +91,7 @@ module.exports = class Exoid
       return cachedStream = @_batchCacheRequest req, isErrorable, streamId
 
   _batchCacheRequest: (req, isErrorable, streamId) =>
-    if _.isEmpty @_batchQueue
+    if _isEmpty @_batchQueue
       setTimeout @_consumeBatchQueue
 
     resStreams = new Rx.ReplaySubject(1)
@@ -91,10 +101,10 @@ module.exports = class Exoid
     resStreams.switch()
 
   _updateCacheStream: =>
-    stream = Rx.Observable.combineLatest _.map @_cache, ({stream}, key) ->
+    stream = Rx.Observable.combineLatest _map @_cache, ({stream}, key) ->
       stream.map (value) -> [key, value]
     .map (pairs) ->
-      _.transform pairs, (cache, [key, val]) ->
+      _transform pairs, (cache, [key, val]) ->
         cache[key] = val
       , {}
 
@@ -117,25 +127,25 @@ module.exports = class Exoid
     batchId = uuid.v4()
     @io.on batchId, ({results, cache, errors}) =>
       # update explicit caches from response
-      _.map cache, ({path, body, result}) =>
+      _map cache, ({path, body, result}) =>
         @_cacheSet stringify({path, body}), Rx.Observable.just result
 
       # update implicit caches from results
-      _.map results, @_cacheRefs
+      _map results, @_cacheRefs
 
       # update explicit request cache result, using ref-stream
       # top level replacement only
-      _.map _.zip(queue, results, errors),
+      _map _zip(queue, results, errors),
       ([{req, resStreams, isErrorable}, result, error]) =>
         if isErrorable and error?
           properError = new Error "#{JSON.stringify error}"
-          resStreams.onError _.defaults properError, error
+          resStreams.onError _defaults properError, error
         else if not error?
           resStreams.onNext @_streamResult req, result
         else
           log.error error
     , (error) ->
-      _.map queue, ({resStreams, isErrorable}) ->
+      _map queue, ({resStreams, isErrorable}) ->
         if isErrorable
           resStreams.onError error
         else
@@ -146,7 +156,7 @@ module.exports = class Exoid
     @ioEmit 'exoid', {
       batchId: batchId
       isClient: window?
-      requests: _.pluck queue, 'req'
+      requests: _map queue, 'req'
     }
     # .catch log.error
 
@@ -168,7 +178,7 @@ module.exports = class Exoid
     if @_cache[key]? and not ignoreCache
       return @_cache[key].stream
 
-    if _.isString(body) and uuidRegex.test(body) and @_cache[resourceKey]?
+    if _isString(body) and uuidRegex.test(body) and @_cache[resourceKey]?
       resultPromise = @_cache[resourceKey].stream.take(1).toPromise()
       stream = Rx.Observable.defer ->
         resultPromise
@@ -201,9 +211,9 @@ module.exports = class Exoid
     return null
 
   invalidateAll: =>
-    _.map @_cache, ({requestStreams}, key) =>
+    _map @_cache, ({requestStreams}, key) =>
       req = JSON.parse key
-      if _.isString(req.path) and uuidRegex.test(req.path)
+      if _isString(req.path) and uuidRegex.test(req.path)
         return
       requestStreams.onNext @_deferredRequestStream req
     return null
@@ -213,16 +223,16 @@ module.exports = class Exoid
     key = stringify req
     resourceKey = stringify {path}
 
-    if _.isString(path) and uuidRegex.test(path) and @_cache[resourceKey]?
+    if _isString(path) and uuidRegex.test(path) and @_cache[resourceKey]?
       @_cache[resourceKey].requestStreams.onNext Rx.Observable.just(undefined)
       return null
 
-    _.map @_cache, ({requestStreams}, cacheKey) =>
+    _map @_cache, ({requestStreams}, cacheKey) =>
       req = JSON.parse cacheKey
-      if _.isString(req.path) and uuidRegex.test(req.path)
+      if _isString(req.path) and uuidRegex.test(req.path)
         return
 
-      if req.path is path and _.isUndefined body
+      if req.path is path and _isUndefined body
         requestStreams.onNext @_deferredRequestStream req
       else if cacheKey is key
         requestStreams.onNext @_deferredRequestStream req
