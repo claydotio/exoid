@@ -1,15 +1,14 @@
 _ = require 'lodash'
 Rx = require 'rx-lite'
 log = require 'loga'
-request = require 'clay-request'
 stringify = require 'json-stable-stringify'
+uuid = require 'node-uuid'
 
 uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 module.exports = class Exoid
-  constructor: ({@api, cache, @fetch}) ->
+  constructor: ({@api, cache, @ioEmit, @io}) ->
     cache ?= {}
-    @fetch ?= request
 
     @_cache = {}
     @_batchQueue = []
@@ -17,6 +16,8 @@ module.exports = class Exoid
     @cacheStreams = new Rx.ReplaySubject(1)
     @cacheStreams.onNext Rx.Observable.just @_cache
     @cacheStream = @cacheStreams.switch()
+
+    @io.on 'disconnect', @invalidateAll
 
     _.map cache, @_cacheRefs
 
@@ -71,19 +72,20 @@ module.exports = class Exoid
 
     return stream
 
-  _deferredRequestStream: (req, isErrorable) =>
+  _deferredRequestStream: (req, isErrorable, streamId) =>
     cachedStream = null
     Rx.Observable.defer =>
       if cachedStream?
         return cachedStream
 
-      return cachedStream = @_batchCacheRequest req, isErrorable
+      return cachedStream = @_batchCacheRequest req, isErrorable, streamId
 
-  _batchCacheRequest: (req, isErrorable) =>
+  _batchCacheRequest: (req, isErrorable, streamId) =>
     if _.isEmpty @_batchQueue
       setTimeout @_consumeBatchQueue
 
     resStreams = new Rx.ReplaySubject(1)
+    req.streamId = streamId
     @_batchQueue.push {req, resStreams, isErrorable}
 
     resStreams.switch()
@@ -112,11 +114,8 @@ module.exports = class Exoid
     queue = @_batchQueue
     @_batchQueue = []
 
-    @fetch @api,
-      method: 'post'
-      body:
-        requests: _.pluck queue, 'req'
-    .then ({results, cache, errors}) =>
+    batchId = uuid.v4()
+    @io.on batchId, ({results, cache, errors}) =>
       # update explicit caches from response
       _.map cache, ({path, body, result}) =>
         @_cacheSet stringify({path, body}), Rx.Observable.just result
@@ -129,8 +128,7 @@ module.exports = class Exoid
       _.map _.zip(queue, results, errors),
       ([{req, resStreams, isErrorable}, result, error]) =>
         if isErrorable and error?
-          properError = new Error error.info
-          properError.status = error.status
+          properError = new Error "#{JSON.stringify error}"
           resStreams.onError _.defaults properError, error
         else if not error?
           resStreams.onNext @_streamResult req, result
@@ -142,7 +140,15 @@ module.exports = class Exoid
           resStreams.onError error
         else
           log.error error
-    .catch log.error
+
+      # TODO: dispose
+
+    @ioEmit 'exoid', {
+      batchId: batchId
+      isClient: window?
+      requests: _.pluck queue, 'req'
+    }
+    # .catch log.error
 
   getCached: (path, body) =>
     req = {path, body}
@@ -156,6 +162,7 @@ module.exports = class Exoid
   stream: (path, body, {ignoreCache} = {}) =>
     req = {path, body}
     key = stringify req
+    streamId = uuid.v4()
     resourceKey = stringify {path: body, embedded: []}
 
     if @_cache[key]? and not ignoreCache
@@ -170,7 +177,10 @@ module.exports = class Exoid
       @_cacheSet key, stream
       return @_cache[key].stream
 
-    stream = @_deferredRequestStream req
+    batchStream = @_deferredRequestStream req, false, streamId
+    requestStream = Rx.Observable.fromEvent @io, streamId
+    stream = Rx.Observable.merge(batchStream, requestStream)
+
     if ignoreCache
       return stream
 
