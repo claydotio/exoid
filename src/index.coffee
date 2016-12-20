@@ -216,6 +216,7 @@ module.exports = class Exoid
       if _isString(req.path) and uuidRegex.test(req.path)
         return
       requestStreams.onNext @_deferredRequestStream req
+    @_cache = {}
     return null
 
   invalidate: (path, body) =>
@@ -225,6 +226,7 @@ module.exports = class Exoid
 
     if _isString(path) and uuidRegex.test(path) and @_cache[resourceKey]?
       @_cache[resourceKey].requestStreams.onNext Rx.Observable.just(undefined)
+      delete @_cache[resourceKey]
       return null
 
     _map @_cache, ({requestStreams}, cacheKey) =>
