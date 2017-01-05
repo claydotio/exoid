@@ -2,12 +2,14 @@ _map = require 'lodash/map'
 _isArray = require 'lodash/isArray'
 _filter = require 'lodash/filter'
 _isEmpty = require 'lodash/isEmpty'
-_some = require 'lodash/some'
 _isUndefined = require 'lodash/isUndefined'
 _find = require 'lodash/find'
 _transform = require 'lodash/transform'
 _zip = require 'lodash/zip'
 _defaults = require 'lodash/defaults'
+_clone = require 'lodash/clone'
+_forEach = require 'lodash/forEach'
+_findIndex = require 'lodash/findIndex'
 Rx = require 'rx-lite'
 log = require 'loga'
 stringify = require 'json-stable-stringify'
@@ -19,8 +21,10 @@ module.exports = class Exoid
 
     @_cache = {}
     @_batchQueue = []
+    @_listeners = {}
+    @_consumeTimeout = null
 
-    @cacheStreams = new Rx.ReplaySubject(1)
+    @cacheStreams = new Rx.ReplaySubject 1
     @cacheStreams.onNext Rx.Observable.just @_cache
     @cacheStream = @cacheStreams.switch()
 
@@ -29,25 +33,53 @@ module.exports = class Exoid
     _map cache, (result, key) =>
       req = JSON.parse key
 
-      @_cacheSet key, @_streamResult req, result
+      @_cacheSet key, Rx.Observable.just result
 
-  _deferredRequestStream: (req, isErrorable, streamId) =>
+  _deferredRequestStream: (req, options = {}) =>
+    {isErrorable, streamId, clientChangesStream, initialSortFn} = options
+
     cachedStream = null
     Rx.Observable.defer =>
       if cachedStream?
         return cachedStream
 
-      return cachedStream = @_batchCacheRequest req, isErrorable, streamId
+      batchStream = @_batchCacheRequest req, {isErrorable, streamId}
 
-  _batchCacheRequest: (req, isErrorable, streamId) =>
-    if _isEmpty @_batchQueue
-      setTimeout @_consumeBatchQueue
+      requestStream = if streamId \
+                      then @_replaySubjectFromIo @io, streamId
+                      else Rx.Observable.just null
+      clientChangesStream ?= new Rx.ReplaySubject 0
+      clientChangesStream = clientChangesStream.map (change) ->
+        {initial: null, changes: [{newVal: change}]}
 
-    resStreams = new Rx.ReplaySubject(1)
+      cachedStream = Rx.Observable.merge(
+        batchStream, requestStream, clientChangesStream
+      )
+      .scan (items, update) =>
+        @_combineChanges {
+          items
+          initial: if update?.changes then null else update
+          changes: update?.changes
+        }, {initialSortFn}
+      , []
+
+  _replaySubjectFromIo: (io, eventName) =>
+    unless @_listeners[eventName]
+      replaySubject = new Rx.ReplaySubject 1
+      ioListener = io.on eventName, (data) ->
+        replaySubject.onNext data
+      @_listeners[eventName] = {replaySubject, ioListener}
+    @_listeners[eventName].replaySubject
+
+  _batchCacheRequest: (req, {isErrorable, streamId}) =>
+    unless @_consumeTimeout
+      @_consumeTimeout = setTimeout @_consumeBatchQueue
+
+    res = new Rx.ReplaySubject 1
     req.streamId = streamId
-    @_batchQueue.push {req, resStreams, isErrorable}
+    @_batchQueue.push {req, res, isErrorable}
 
-    resStreams.switch()
+    res
 
   _updateCacheStream: =>
     stream = Rx.Observable.combineLatest _map @_cache, ({stream}, key) ->
@@ -61,10 +93,10 @@ module.exports = class Exoid
 
   getCacheStream: => @cacheStream
 
-  _cacheSet: (key, stream) =>
+  _cacheSet: (key, stream, options) =>
     unless @_cache[key]?
-      requestStreams = new Rx.ReplaySubject(1)
-      @_cache[key] = {stream: requestStreams.switch(), requestStreams}
+      requestStreams = new Rx.ReplaySubject 1
+      @_cache[key] = {stream: requestStreams.switch(), requestStreams, options}
       @_updateCacheStream()
 
     @_cache[key].requestStreams.onNext stream
@@ -72,37 +104,49 @@ module.exports = class Exoid
   _consumeBatchQueue: =>
     queue = @_batchQueue
     @_batchQueue = []
+    @_consumeTimeout = null
 
     batchId = uuid.v4()
-    @io.on batchId, ({results, cache, errors}) =>
-      # update explicit caches from response
-      _map cache, ({path, body, result}) =>
-        @_cacheSet stringify({path, body}), Rx.Observable.just result
-
-      _map _zip(queue, results, errors),
-      ([{req, resStreams, isErrorable}, result, error]) =>
+    @io.once batchId, ({results, cache, errors}) =>
+      zippedQueue = _zip(queue, results, errors)
+      _map zippedQueue, ([{req, res, isErrorable}, result, error]) =>
         if isErrorable and error?
           properError = new Error "#{JSON.stringify error}"
-          resStreams.onError _defaults properError, error
+          res.onError _defaults properError, error
         else if not error?
-          resStreams.onNext Rx.Observable.just result
+          res.onNext result
         else
           log.error error
     , (error) ->
-      _map queue, ({resStreams, isErrorable}) ->
+      _map queue, ({res, isErrorable}) ->
         if isErrorable
-          resStreams.onError error
+          res.onError error
         else
           log.error error
-
-      # TODO: dispose
 
     @ioEmit 'exoid', {
       batchId: batchId
       isClient: window?
       requests: _map queue, 'req'
     }
-    # .catch log.error
+
+  _combineChanges: ({items, initial, changes}, {initialSortFn}) ->
+    if initial
+      items = initial
+      if _isArray(items) and initialSortFn
+        items = initialSortFn items
+    else if changes
+      _forEach changes, (change) ->
+        existingIndex = change.oldId and
+                        _findIndex(items, {id: change.oldId}) or
+                        _findIndex(items, {clientId: change.newVal?.clientId})
+        if existingIndex? and existingIndex isnt -1 and change.newVal
+          items.splice existingIndex, 1, change.newVal
+        else if existingIndex? and existingIndex isnt -1
+          items.splice existingIndex, 1
+        else
+          items = items.concat [change.newVal]
+    return items
 
   getCached: (path, body) =>
     req = {path, body}
@@ -113,37 +157,43 @@ module.exports = class Exoid
     else
       Promise.resolve null
 
-  stream: (path, body, {ignoreCache} = {}) =>
+  stream: (path, body, options = {}) =>
+    {ignoreCache} = options
+
     req = {path, body}
     key = stringify req
     streamId = uuid.v4()
 
-    if @_cache[key]? and not ignoreCache
-      return @_cache[key].stream
+    if not @_cache[key]? or ignoreCache
+      options = _defaults options, {
+        streamId
+        isErrorable: false
+      }
+      stream = @_deferredRequestStream req, options
 
-    batchStream = @_deferredRequestStream req, false, streamId
-    requestStream = Rx.Observable.fromEvent @io, streamId
-    stream = Rx.Observable.merge(batchStream, requestStream)
+      if ignoreCache
+        return stream
 
-    if ignoreCache
-      return stream
+      @_cacheSet key, stream, options
 
-    @_cacheSet key, stream
     return @_cache[key].stream
 
   call: (path, body) =>
     req = {path, body}
     key = stringify req
 
-    stream = @_deferredRequestStream req, true
+    stream = @_batchCacheRequest req, {isErrorable: true}
     return stream.take(1).toPromise().then (result) ->
       return result
 
   invalidateAll: =>
-    _map @_cache, ({requestStreams}, key) =>
+    _map @_cache, ({requestStreams, options}, key) =>
       req = JSON.parse key
-      requestStreams.onNext @_deferredRequestStream req
+      requestStreams.onNext @_deferredRequestStream req, options
     @_cache = {}
+    _map @_listeners, (listener, streamId) =>
+      @io.off streamId, listener?.ioListener
+    @_listeners = {}
     return null
 
   invalidate: (path, body) =>
