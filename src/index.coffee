@@ -38,22 +38,16 @@ module.exports = class Exoid
   _deferredRequestStream: (req, options = {}) =>
     {isErrorable, streamId, clientChangesStream, initialSortFn} = options
 
-    cachedStream = null
     Rx.Observable.defer =>
-      if cachedStream?
-        return cachedStream
-
       batchStream = @_batchCacheRequest req, {isErrorable, streamId}
 
       requestStream = if streamId \
                       then @_replaySubjectFromIo @io, streamId
                       else Rx.Observable.just null
-      clientChangesStream ?= new Rx.ReplaySubject 0
-      clientChangesStream = clientChangesStream.map (change) ->
-        {initial: null, changes: [{newVal: change}]}
+      changesStream = Rx.Observable.merge requestStream, clientChangesStream
 
-      cachedStream = Rx.Observable.merge(
-        batchStream, requestStream, clientChangesStream
+      Rx.Observable.concat(
+        batchStream, changesStream
       )
       .scan (items, update) =>
         @_combineChanges {
@@ -61,11 +55,12 @@ module.exports = class Exoid
           initial: if update?.changes then null else update
           changes: update?.changes
         }, {initialSortFn}
-      , []
+      , null
+      .shareReplay 1
 
   _replaySubjectFromIo: (io, eventName) =>
     unless @_listeners[eventName]
-      replaySubject = new Rx.ReplaySubject 1
+      replaySubject = new Rx.ReplaySubject 0
       ioListener = io.on eventName, (data) ->
         replaySubject.onNext data
       @_listeners[eventName] = {replaySubject, ioListener}
@@ -75,7 +70,7 @@ module.exports = class Exoid
     unless @_consumeTimeout
       @_consumeTimeout = setTimeout @_consumeBatchQueue
 
-    res = new Rx.ReplaySubject 1
+    res = new Rx.AsyncSubject()
     req.streamId = streamId
     @_batchQueue.push {req, res, isErrorable}
 
@@ -115,6 +110,7 @@ module.exports = class Exoid
           res.onError _defaults properError, error
         else if not error?
           res.onNext result
+          res.onCompleted()
         else
           log.error error
     , (error) ->
@@ -132,10 +128,11 @@ module.exports = class Exoid
 
   _combineChanges: ({items, initial, changes}, {initialSortFn}) ->
     if initial
-      items = initial
+      items = _clone initial
       if _isArray(items) and initialSortFn
         items = initialSortFn items
     else if changes
+      items ?= []
       _forEach changes, (change) ->
         existingIndex = change.oldId and
                         _findIndex(items, {id: change.oldId}) or
@@ -169,6 +166,12 @@ module.exports = class Exoid
         streamId
         isErrorable: false
       }
+      clientChangesStream = options.clientChangesStream
+      clientChangesStream ?= new Rx.ReplaySubject 0
+      clientChangesStream = clientChangesStream.map (change) ->
+        {initial: null, changes: [{newVal: change}], isClient: true}
+      options.clientChangesStream = clientChangesStream
+
       stream = @_deferredRequestStream req, options
 
       if ignoreCache
