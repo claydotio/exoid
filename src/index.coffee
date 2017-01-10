@@ -44,6 +44,7 @@ module.exports = class Exoid
       requestStream = if streamId \
                       then @_replaySubjectFromIo @io, streamId
                       else Rx.Observable.just null
+      clientChangesStream ?= Rx.Observable.just null
       changesStream = Rx.Observable.merge requestStream, clientChangesStream
 
       Rx.Observable.concat(
