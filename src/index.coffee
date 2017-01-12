@@ -7,6 +7,8 @@ _find = require 'lodash/find'
 _transform = require 'lodash/transform'
 _zip = require 'lodash/zip'
 _defaults = require 'lodash/defaults'
+_pickBy = require 'lodash/pickBy'
+_mapValues = require 'lodash/mapValues'
 _clone = require 'lodash/clone'
 _forEach = require 'lodash/forEach'
 _findIndex = require 'lodash/findIndex'
@@ -36,6 +38,7 @@ module.exports = class Exoid
       @_cacheSet key, Rx.Observable.just result
 
   _deferredRequestStream: (req, options = {}) =>
+
     {isErrorable, streamId, clientChangesStream, initialSortFn} = options
 
     Rx.Observable.defer =>
@@ -103,9 +106,9 @@ module.exports = class Exoid
     @_consumeTimeout = null
 
     batchId = uuid.v4()
-    @io.once batchId, ({results, cache, errors}) =>
+    @io.once batchId, ({results, cache, errors}) ->
       zippedQueue = _zip(queue, results, errors)
-      _map zippedQueue, ([{req, res, isErrorable}, result, error]) =>
+      _map zippedQueue, ([{req, res, isErrorable}, result, error]) ->
         if isErrorable and error?
           properError = new Error "#{JSON.stringify error}"
           res.onError _defaults properError, error
@@ -172,7 +175,6 @@ module.exports = class Exoid
       clientChangesStream = clientChangesStream.map (change) ->
         {initial: null, changes: [{newVal: change}], isClient: true}
       options.clientChangesStream = clientChangesStream
-
       stream = @_deferredRequestStream req, options
 
       if ignoreCache
@@ -191,12 +193,19 @@ module.exports = class Exoid
       return result
 
   invalidateAll: =>
-    _map @_cache, ({requestStreams, options}, key) =>
-      req = JSON.parse key
-      requestStreams.onNext @_deferredRequestStream req, options
-    @_cache = {}
     _map @_listeners, (listener, streamId) =>
       @io.off streamId, listener?.ioListener
+
+    @_cache = _pickBy _mapValues(@_cache, (cache, key) =>
+      {requestStreams, options} = cache
+      unless requestStreams.hasObservers()
+        return false
+      req = JSON.parse key
+      set = @_deferredRequestStream req, options
+      requestStreams.onNext set
+      cache
+    ), (val) -> val
+
     @_listeners = {}
     return null
 
