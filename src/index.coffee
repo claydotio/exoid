@@ -41,14 +41,14 @@ module.exports = class Exoid
 
     {isErrorable, streamId, clientChangesStream, initialSortFn} = options
 
-    Rx.Observable.defer =>
-      batchStream = @_batchCacheRequest req, {isErrorable, streamId}
+    batchStream = @_batchCacheRequest req, {isErrorable, streamId}
+    requestStream = if streamId \
+                    then @_replaySubjectFromIo @io, streamId
+                    else Rx.Observable.just null
+    clientChangesStream ?= Rx.Observable.just null
+    changesStream = Rx.Observable.merge requestStream, clientChangesStream
 
-      requestStream = if streamId \
-                      then @_replaySubjectFromIo @io, streamId
-                      else Rx.Observable.just null
-      clientChangesStream ?= Rx.Observable.just null
-      changesStream = Rx.Observable.merge requestStream, clientChangesStream
+    Rx.Observable.defer =>
 
       Rx.Observable.concat(
         batchStream, changesStream
@@ -71,12 +71,13 @@ module.exports = class Exoid
     @_listeners[eventName].replaySubject
 
   _batchCacheRequest: (req, {isErrorable, streamId}) =>
+    streamId ?= uuid.v4()
     unless @_consumeTimeout
       @_consumeTimeout = setTimeout @_consumeBatchQueue
 
     res = new Rx.AsyncSubject()
     req.streamId = streamId
-    @_batchQueue.push {req, res, isErrorable}
+    @_batchQueue.push {req, res, isErrorable, streamId}
 
     res
 
@@ -105,10 +106,18 @@ module.exports = class Exoid
     @_batchQueue = []
     @_consumeTimeout = null
 
-    batchId = uuid.v4()
-    @io.once batchId, ({results, cache, errors}) ->
-      zippedQueue = _zip(queue, results, errors)
-      _map zippedQueue, ([{req, res, isErrorable}, result, error]) ->
+    start = Date.now()
+    onBatch = (responses) =>
+      _forEach responses, ({result, error}, streamId) =>
+        queueIndex = _findIndex queue, {streamId}
+        {req, res, isErrorable} = queue[queueIndex]
+        console.log '-----------'
+        console.log req.path, req.body, req.query, Date.now() - start
+        console.log '-----------'
+        queue.splice queueIndex, 1
+        if _isEmpty queue
+          @io.off streamId, onBatch
+
         if isErrorable and error?
           properError = new Error "#{JSON.stringify error}"
           res.onError _defaults properError, error
@@ -117,7 +126,9 @@ module.exports = class Exoid
           res.onCompleted()
         else
           log.error error
-    , (error) ->
+
+    batchId = uuid.v4()
+    @io.on batchId, onBatch, (error) ->
       _map queue, ({res, isErrorable}) ->
         if isErrorable
           res.onError error
@@ -186,7 +197,6 @@ module.exports = class Exoid
 
   call: (path, body) =>
     req = {path, body}
-    key = stringify req
 
     stream = @_batchCacheRequest req, {isErrorable: true}
     return stream.take(1).toPromise().then (result) ->
