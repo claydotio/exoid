@@ -49,7 +49,6 @@ module.exports = class Exoid
     changesStream = Rx.Observable.merge requestStream, clientChangesStream
 
     Rx.Observable.defer =>
-
       Rx.Observable.concat(
         batchStream, changesStream
       )
@@ -72,11 +71,13 @@ module.exports = class Exoid
 
   _batchCacheRequest: (req, {isErrorable, streamId}) =>
     streamId ?= uuid.v4()
+    req.streamId = streamId
+
     unless @_consumeTimeout
       @_consumeTimeout = setTimeout @_consumeBatchQueue
 
     res = new Rx.AsyncSubject()
-    req.streamId = streamId
+
     @_batchQueue.push {req, res, isErrorable, streamId}
 
     res
@@ -111,12 +112,12 @@ module.exports = class Exoid
       _forEach responses, ({result, error}, streamId) =>
         queueIndex = _findIndex queue, {streamId}
         {req, res, isErrorable} = queue[queueIndex]
-        console.log '-----------'
-        console.log req.path, req.body, req.query, Date.now() - start
-        console.log '-----------'
+        # console.log '-----------'
+        # console.log req.path, req.body, req.query, Date.now() - start
+        # console.log '-----------'
         queue.splice queueIndex, 1
         if _isEmpty queue
-          @io.off streamId, onBatch
+          @io.off batchId, onBatch
 
         if isErrorable and error?
           properError = new Error "#{JSON.stringify error}"
