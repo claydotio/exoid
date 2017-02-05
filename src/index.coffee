@@ -26,50 +26,51 @@ module.exports = class Exoid
     @_listeners = {}
     @_consumeTimeout = null
 
-    @cacheStreams = new Rx.ReplaySubject 1
-    @cacheStreams.onNext Rx.Observable.just @_cache
-    @cacheStream = @cacheStreams.switch()
+    @dataCacheStreams = new Rx.ReplaySubject 1
+    @dataCacheStreams.onNext Rx.Observable.just cache
+    @dataCacheStream = @dataCacheStreams.switch()
 
     @io.on 'disconnect', @invalidateAll
 
     _map cache, (result, key) =>
       req = JSON.parse key
 
-      @_cacheSet key, Rx.Observable.just result
+      @_cacheSet key, {dataStream: Rx.Observable.just result}
 
-  _deferredRequestStream: (req, options = {}) =>
+  _updateDataCacheStream: =>
+    stream = Rx.Observable.combineLatest _map @_cache, ({dataStream}, key) ->
+      dataStream.map (value) -> [key, value]
+    .map (pairs) ->
+      _transform pairs, (cache, [key, val]) ->
+        cache[key] = val
+      , {}
 
-    {isErrorable, streamId, clientChangesStream, initialSortFn} = options
+    @dataCacheStreams.onNext stream
 
-    batchStream = @_batchCacheRequest req, {isErrorable, streamId}
-    requestStream = if streamId \
-                    then @_replaySubjectFromIo @io, streamId
-                    else Rx.Observable.just null
-    clientChangesStream ?= Rx.Observable.just null
-    changesStream = Rx.Observable.merge requestStream, clientChangesStream
+  getCacheStream: => @dataCacheStream
 
-    Rx.Observable.defer =>
-      Rx.Observable.concat(
-        batchStream, changesStream
-      )
-      .scan (items, update) =>
-        @_combineChanges {
-          items
-          initial: if update?.changes then null else update
-          changes: update?.changes
-        }, {initialSortFn}
-      , null
-      .shareReplay 1
+  _cacheSet: (key, {combinedStream, dataStream, options}) =>
+    if dataStream and not @_cache[key]?.dataStream
+      dataStreams = new Rx.ReplaySubject 1
+      @_cache[key] ?= {}
+      @_cache[key].dataStreams = dataStreams
+      @_cache[key].dataStream = dataStreams.switch()
 
-  _replaySubjectFromIo: (io, eventName) =>
-    unless @_listeners[eventName]
-      replaySubject = new Rx.ReplaySubject 0
-      ioListener = io.on eventName, (data) ->
-        replaySubject.onNext data
-      @_listeners[eventName] = {replaySubject, ioListener}
-    @_listeners[eventName].replaySubject
+    if combinedStream and not @_cache[key]?.combinedStream
+      combinedStreams = new Rx.ReplaySubject 1
+      @_cache[key] ?= {}
+      @_cache[key].options = options
+      @_cache[key].combinedStreams = combinedStreams
+      @_cache[key].combinedStream = combinedStreams.switch()
 
-  _batchCacheRequest: (req, {isErrorable, streamId}) =>
+    if dataStream
+      @_cache[key].dataStreams.onNext dataStream
+      @_updateDataCacheStream()
+
+    if combinedStream
+      @_cache[key].combinedStreams.onNext combinedStream
+
+  _batchRequest: (req, {isErrorable, streamId} = {}) =>
     streamId ?= uuid.v4()
     req.streamId = streamId
 
@@ -77,30 +78,8 @@ module.exports = class Exoid
       @_consumeTimeout = setTimeout @_consumeBatchQueue
 
     res = new Rx.AsyncSubject()
-
     @_batchQueue.push {req, res, isErrorable, streamId}
-
     res
-
-  _updateCacheStream: =>
-    stream = Rx.Observable.combineLatest _map @_cache, ({stream}, key) ->
-      stream.map (value) -> [key, value]
-    .map (pairs) ->
-      _transform pairs, (cache, [key, val]) ->
-        cache[key] = val
-      , {}
-
-    @cacheStreams.onNext stream
-
-  getCacheStream: => @cacheStream
-
-  _cacheSet: (key, stream, options) =>
-    unless @_cache[key]?
-      requestStreams = new Rx.ReplaySubject 1
-      @_cache[key] = {stream: requestStreams.switch(), requestStreams, options}
-      @_updateCacheStream()
-
-    @_cache[key].requestStreams.onNext stream
 
   _consumeBatchQueue: =>
     queue = @_batchQueue
@@ -142,6 +121,35 @@ module.exports = class Exoid
       requests: _map queue, 'req'
     }
 
+  _combinedRequestStream: (req, options = {}) =>
+    {isErrorable, streamId, clientChangesStream,
+      initialSortFn, ignoreCache} = options
+
+    initialDataStream = @_initialDataRequest req, {
+      isErrorable, streamId, ignoreCache
+    }
+    additionalDataStream = if streamId \
+                           then @_replaySubjectFromIo @io, streamId
+                           else Rx.Observable.just null
+    clientChangesStream ?= Rx.Observable.just null
+    changesStream = Rx.Observable.merge(
+      additionalDataStream, clientChangesStream
+    )
+    .shareReplay 1
+
+    # ideally we'd use concat here instead, but initialDataStream is
+    # a switch observable because of cache
+    Rx.Observable.merge(
+      initialDataStream, changesStream
+    )
+    .scan (items, update) =>
+      @_combineChanges {
+        items
+        initial: if update?.changes then null else update
+        changes: update?.changes
+      }, {initialSortFn}
+    , null
+
   _combineChanges: ({items, initial, changes}, {initialSortFn}) ->
     if initial
       items = _clone initial
@@ -161,23 +169,47 @@ module.exports = class Exoid
           items = items.concat [change.newVal]
     return items
 
+  _replaySubjectFromIo: (io, eventName) =>
+    unless @_listeners[eventName]
+      replaySubject = new Rx.ReplaySubject 0
+      # TODO: does this have bad side-effects?
+      # if stream gets to 0 subscribers, the next subscriber starts over
+      # from scratch and we lose all the progress of the .scan.
+      # This is because shareReplay (and any subject) will disconnect when it
+      # hits 0 and reconnect. The supposed solution is "autoconnect", I think,
+      # but it's not in rxjs at the moment: http://stackoverflow.com/a/36118469
+      disposable = replaySubject.subscribe ->
+        null
+      ioListener = io.on eventName, (data) ->
+        replaySubject.onNext data
+      @_listeners[eventName] = {replaySubject, ioListener, disposable}
+    @_listeners[eventName].replaySubject
+
+  _initialDataRequest: (req, {isErrorable, streamId, ignoreCache}) =>
+    key = stringify req
+    if not @_cache[key]?.dataStream or ignoreCache
+      # should only be caching the actual async result and nothing more, since
+      # that's all we can really get from server -> client rendering with
+      # json.stringify
+      @_cacheSet key, {dataStream: @_batchRequest(req, {isErrorable, streamId})}
+
+    @_cache[key].dataStream
+
   getCached: (path, body) =>
     req = {path, body}
     key = stringify req
 
     if @_cache[key]?
-      @_cache[key].stream.take(1).toPromise()
+      @_cache[key].dataStream.take(1).toPromise()
     else
       Promise.resolve null
 
   stream: (path, body, options = {}) =>
-    {ignoreCache} = options
-
     req = {path, body}
     key = stringify req
-    streamId = uuid.v4()
 
-    if not @_cache[key]? or ignoreCache
+    unless @_cache[key]?.combinedStream
+      streamId = uuid.v4()
       options = _defaults options, {
         streamId
         isErrorable: false
@@ -187,45 +219,45 @@ module.exports = class Exoid
       clientChangesStream = clientChangesStream.map (change) ->
         {initial: null, changes: [{newVal: change}], isClient: true}
       options.clientChangesStream = clientChangesStream
-      stream = @_deferredRequestStream req, options
 
-      if ignoreCache
-        return stream
+      @_cacheSet key, {
+        options
+        combinedStream: @_combinedRequestStream req, options
+      }
 
-      @_cacheSet key, stream, options
-
-    return @_cache[key].stream
+    @_cache[key]?.combinedStream
 
   call: (path, body) =>
     req = {path, body}
 
-    stream = @_batchCacheRequest req, {isErrorable: true}
+    stream = @_batchRequest req, {isErrorable: true}
     return stream.take(1).toPromise().then (result) ->
       return result
 
   invalidateAll: =>
     _map @_listeners, (listener, streamId) =>
       @io.off streamId, listener?.ioListener
+      listener?.disposable?.dispose()
+    @_listeners = {}
 
     @_cache = _pickBy _mapValues(@_cache, (cache, key) =>
-      {requestStreams, options} = cache
-      unless requestStreams.hasObservers()
+      {dataStreams, combinedStreams, options} = cache
+      unless combinedStreams.hasObservers()
         return false
       req = JSON.parse key
-      set = @_deferredRequestStream req, options
-      requestStreams.onNext set
+      dataStreams.onNext @_batchRequest req
+      combinedStreams.onNext @_combinedRequestStream req, options
       cache
     ), (val) -> val
-
-    @_listeners = {}
     return null
 
   invalidate: (path, body) =>
     req = {path, body}
     key = stringify req
 
-    _map @_cache, ({requestStreams}, cacheKey) =>
+    _map @_cache, ({dataStreams, combinedStreams, options}, cacheKey) =>
       req = JSON.parse cacheKey
       if req.path is path and _isUndefined body or cacheKey is key
-        requestStreams.onNext @_deferredRequestStream req
+        dataStreams.onNext @_batchRequest req
+        combinedStreams.onNext @_combinedRequestStream req, options
     return null
