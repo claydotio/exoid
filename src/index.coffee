@@ -90,6 +90,9 @@ module.exports = class Exoid
     onBatch = (responses) =>
       _forEach responses, ({result, error}, streamId) =>
         queueIndex = _findIndex queue, {streamId}
+        if queueIndex is -1
+          console.log 'stream ignored', streamId
+          return
         {req, res, isErrorable} = queue[queueIndex]
         # console.log '-----------'
         # console.log req.path, req.body, req.query, Date.now() - start
