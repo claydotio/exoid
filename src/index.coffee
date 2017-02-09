@@ -38,11 +38,18 @@ module.exports = class Exoid
       @_cacheSet key, {dataStream: Rx.Observable.just result}
 
   _updateDataCacheStream: =>
-    stream = Rx.Observable.combineLatest _map @_cache, ({dataStream}, key) ->
-      dataStream.map (value) -> [key, value]
+    dataStreamsArray = _map(@_cache, ({dataStream}, key) ->
+      dataStream.map (value) ->
+        [key, value]
+    )
+    stream = Rx.Observable.combineLatest.apply this, dataStreamsArray.concat [
+      (vals...) -> vals
+    ]
     .map (pairs) ->
       _transform pairs, (cache, [key, val]) ->
-        cache[key] = val
+        # ignore if the request hasn't finished yet (esp for server-side render)
+        if val isnt null
+          cache[key] = val
       , {}
 
     @dataCacheStreams.onNext stream
@@ -51,10 +58,11 @@ module.exports = class Exoid
 
   _cacheSet: (key, {combinedStream, dataStream, options}) =>
     if dataStream and not @_cache[key]?.dataStream
-      dataStreams = new Rx.ReplaySubject 1
+      dataStreams = new Rx.BehaviorSubject(Rx.Observable.just null)
       @_cache[key] ?= {}
       @_cache[key].dataStreams = dataStreams
       @_cache[key].dataStream = dataStreams.switch()
+      @_updateDataCacheStream()
 
     if combinedStream and not @_cache[key]?.combinedStream
       combinedStreams = new Rx.ReplaySubject 1
@@ -65,7 +73,6 @@ module.exports = class Exoid
 
     if dataStream
       @_cache[key].dataStreams.onNext dataStream
-      @_updateDataCacheStream()
 
     if combinedStream
       @_cache[key].combinedStreams.onNext combinedStream
@@ -110,13 +117,15 @@ module.exports = class Exoid
         else
           log.error error
 
-    batchId = uuid.v4()
-    @io.on batchId, onBatch, (error) ->
+    onError = (error) ->
       _map queue, ({res, isErrorable}) ->
         if isErrorable
           res.onError error
         else
           log.error error
+
+    batchId = uuid.v4()
+    @io.on batchId, onBatch, onError
 
     @ioEmit 'exoid', {
       batchId: batchId
