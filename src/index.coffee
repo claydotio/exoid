@@ -255,7 +255,7 @@ module.exports = class Exoid
 
     @_cache = _pickBy _mapValues(@_cache, (cache, key) =>
       {dataStreams, combinedStreams, options} = cache
-      unless combinedStreams.hasObservers()
+      if not combinedStreams or not combinedStreams.hasObservers()
         return false
       req = JSON.parse key
       dataStreams.onNext @_batchRequest req
