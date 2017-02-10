@@ -12,6 +12,7 @@ _mapValues = require 'lodash/mapValues'
 _clone = require 'lodash/clone'
 _forEach = require 'lodash/forEach'
 _findIndex = require 'lodash/findIndex'
+_keys = require 'lodash/keys'
 Rx = require 'rx-lite'
 log = require 'loga'
 stringify = require 'json-stable-stringify'
@@ -33,8 +34,6 @@ module.exports = class Exoid
     @io.on 'disconnect', @invalidateAll
 
     _map cache, (result, key) =>
-      req = JSON.parse key
-
       @_cacheSet key, {dataStream: Rx.Observable.just result}
 
   _updateDataCacheStream: =>
@@ -82,7 +81,6 @@ module.exports = class Exoid
 
   _batchRequest: (req, {isErrorable, streamId} = {}) =>
     streamId ?= uuid.v4()
-    req.streamId = streamId
 
     unless @_consumeTimeout
       @_consumeTimeout = setTimeout @_consumeBatchQueue
@@ -133,7 +131,7 @@ module.exports = class Exoid
     @ioEmit 'exoid', {
       batchId: batchId
       isClient: window?
-      requests: _map queue, 'req'
+      requests: _map queue, ({req, streamId}) -> _defaults {streamId}, req
     }
 
   _combinedRequestStream: (req, options = {}) =>
