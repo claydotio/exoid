@@ -18,7 +18,7 @@ stringify = require 'json-stable-stringify'
 uuid = require 'node-uuid'
 
 module.exports = class Exoid
-  constructor: ({@api, cache, @ioEmit, @io}) ->
+  constructor: ({@api, cache, @ioEmit, @io, @isServerSide}) ->
     cache ?= {}
 
     @_cache = {}
@@ -58,7 +58,10 @@ module.exports = class Exoid
 
   _cacheSet: (key, {combinedStream, dataStream, options}) =>
     if dataStream and not @_cache[key]?.dataStream
-      dataStreams = new Rx.BehaviorSubject(Rx.Observable.just null)
+      # https://github.com/claydotio/exoid/commit/fc26eb830910b6567d50e15063ec7544e2ccfedc
+      dataStreams = if @isServerSide \
+                    then new Rx.BehaviorSubject(Rx.Observable.just null)
+                    else new Rx.ReplaySubject 1
       @_cache[key] ?= {}
       @_cache[key].dataStreams = dataStreams
       @_cache[key].dataStream = dataStreams.switch()
