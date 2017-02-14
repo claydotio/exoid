@@ -138,6 +138,9 @@ module.exports = class Exoid
     {isErrorable, streamId, clientChangesStream,
       initialSortFn, ignoreCache} = options
 
+    unless @_listeners[streamId]
+      @_listeners[streamId] = {}
+
     initialDataStream = @_initialDataRequest req, {
       isErrorable, streamId, ignoreCache
     }
@@ -148,11 +151,10 @@ module.exports = class Exoid
     changesStream = Rx.Observable.merge(
       additionalDataStream, clientChangesStream
     )
-    .shareReplay 1
 
     # ideally we'd use concat here instead, but initialDataStream is
     # a switch observable because of cache
-    Rx.Observable.merge(
+    combinedStream = Rx.Observable.merge(
       initialDataStream, changesStream
     )
     .scan (items, update) =>
@@ -162,6 +164,18 @@ module.exports = class Exoid
         changes: update?.changes
       }, {initialSortFn}
     , null
+    .shareReplay 1
+
+    # TODO: does this have bad side-effects?
+    # if stream gets to 0 subscribers, the next subscriber starts over
+    # from scratch and we lose all the progress of the .scan.
+    # This is because shareReplay (and any subject) will disconnect when it
+    # hits 0 and reconnect. The supposed solution is "autoconnect", I think,
+    # but it's not in rxjs at the moment: http://stackoverflow.com/a/36118469
+    @_listeners[streamId].combinedDisposable = combinedStream.subscribe ->
+      null
+
+    combinedStream
 
   _combineChanges: ({items, initial, changes}, {initialSortFn}) ->
     if initial
@@ -183,19 +197,12 @@ module.exports = class Exoid
     return items
 
   _replaySubjectFromIo: (io, eventName) =>
-    unless @_listeners[eventName]
+    unless @_listeners[eventName].replaySubject
       replaySubject = new Rx.ReplaySubject 0
-      # TODO: does this have bad side-effects?
-      # if stream gets to 0 subscribers, the next subscriber starts over
-      # from scratch and we lose all the progress of the .scan.
-      # This is because shareReplay (and any subject) will disconnect when it
-      # hits 0 and reconnect. The supposed solution is "autoconnect", I think,
-      # but it's not in rxjs at the moment: http://stackoverflow.com/a/36118469
-      disposable = replaySubject.subscribe ->
-        null
       ioListener = io.on eventName, (data) ->
         replaySubject.onNext data
-      @_listeners[eventName] = {replaySubject, ioListener, disposable}
+      @_listeners[eventName].replaySubject = replaySubject
+      @_listeners[eventName].ioListener = ioListener
     @_listeners[eventName].replaySubject
 
   _initialDataRequest: (req, {isErrorable, streamId, ignoreCache}) =>
@@ -250,7 +257,7 @@ module.exports = class Exoid
   invalidateAll: =>
     _map @_listeners, (listener, streamId) =>
       @io.off streamId, listener?.ioListener
-      listener?.disposable?.dispose()
+      listener.combinedDisposable?.dispose()
     @_listeners = {}
 
     @_cache = _pickBy _mapValues(@_cache, (cache, key) =>
