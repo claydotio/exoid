@@ -31,7 +31,7 @@ module.exports = class Exoid
     @dataCacheStreams.onNext Rx.Observable.just cache
     @dataCacheStream = @dataCacheStreams.switch()
 
-    @io.on 'disconnect', @invalidateAll
+    @io.on 'reconnect', @invalidateAll
 
     _map cache, (result, key) =>
       @_cacheSet key, {dataStream: Rx.Observable.just result}
@@ -199,8 +199,9 @@ module.exports = class Exoid
   _replaySubjectFromIo: (io, eventName) =>
     unless @_listeners[eventName].replaySubject
       replaySubject = new Rx.ReplaySubject 0
-      ioListener = io.on eventName, (data) ->
+      ioListener = (data) ->
         replaySubject.onNext data
+      io.on eventName, ioListener
       @_listeners[eventName].replaySubject = replaySubject
       @_listeners[eventName].ioListener = ioListener
     @_listeners[eventName].replaySubject
@@ -265,7 +266,7 @@ module.exports = class Exoid
       if not combinedStreams or not combinedStreams.hasObservers()
         return false
       req = JSON.parse key
-      dataStreams.onNext @_batchRequest req
+      dataStreams.onNext @_batchRequest req, options
       combinedStreams.onNext @_combinedRequestStream req, options
       cache
     ), (val) -> val
@@ -275,9 +276,10 @@ module.exports = class Exoid
     req = {path, body}
     key = stringify req
 
-    _map @_cache, ({dataStreams, combinedStreams, options}, cacheKey) =>
+    _map @_cache, (cache, cacheKey) =>
+      {dataStreams, combinedStreams, options} = cache
       req = JSON.parse cacheKey
-      if req.path is path and _isUndefined body or cacheKey is key
-        dataStreams.onNext @_batchRequest req
+      if req.path is path and _isUndefined(body) or cacheKey is key
+        dataStreams.onNext @_batchRequest req, options
         combinedStreams.onNext @_combinedRequestStream req, options
     return null
