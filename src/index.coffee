@@ -31,7 +31,7 @@ module.exports = class Exoid
     @dataCacheStreams.onNext Rx.Observable.just cache
     @dataCacheStream = @dataCacheStreams.switch()
 
-    @io.on 'reconnect', @invalidateAll
+    @io.on 'reconnect', => @invalidateAll true
 
     _map cache, (result, key) =>
       @_cacheSet key, {dataStream: Rx.Observable.just result}
@@ -144,9 +144,9 @@ module.exports = class Exoid
     initialDataStream = @_initialDataRequest req, {
       isErrorable, streamId, ignoreCache
     }
-    additionalDataStream = if streamId \
+    additionalDataStream = if streamId and options.isStreamed \
                            then @_replaySubjectFromIo @io, streamId
-                           else Rx.Observable.just null
+                           else new Rx.ReplaySubject 0
     clientChangesStream ?= Rx.Observable.just null
     changesStream = Rx.Observable.merge(
       additionalDataStream, clientChangesStream
@@ -255,11 +255,15 @@ module.exports = class Exoid
     return stream.take(1).toPromise().then (result) ->
       return result
 
-  invalidateAll: =>
+  invalidateAll: (streamsOnly = false) =>
     _map @_listeners, (listener, streamId) =>
       @io.off streamId, listener?.ioListener
       listener.combinedDisposable?.dispose()
     @_listeners = {}
+
+    if streamsOnly
+      @_cache = _pickBy @_cache, (cache, key) ->
+        cache.options?.isStreamed
 
     @_cache = _pickBy _mapValues(@_cache, (cache, key) =>
       {dataStreams, combinedStreams, options} = cache
