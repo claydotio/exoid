@@ -12,6 +12,7 @@ _mapValues = require 'lodash/mapValues'
 _clone = require 'lodash/clone'
 _forEach = require 'lodash/forEach'
 _findIndex = require 'lodash/findIndex'
+_takeRight = require 'lodash/takeRight'
 _keys = require 'lodash/keys'
 Rx = require 'rx-lite'
 log = require 'loga'
@@ -136,7 +137,7 @@ module.exports = class Exoid
 
   _combinedRequestStream: (req, options = {}) =>
     {isErrorable, streamId, clientChangesStream,
-      initialSortFn, ignoreCache} = options
+      initialSortFn, limit, ignoreCache} = options
 
     unless @_listeners[streamId]
       @_listeners[streamId] = {}
@@ -162,7 +163,7 @@ module.exports = class Exoid
         items
         initial: if update?.changes then null else update
         changes: update?.changes
-      }, {initialSortFn}
+      }, {initialSortFn, limit}
     , null
     .shareReplay 1
 
@@ -177,7 +178,7 @@ module.exports = class Exoid
 
     combinedStream
 
-  _combineChanges: ({items, initial, changes}, {initialSortFn}) ->
+  _combineChanges: ({items, initial, changes}, {initialSortFn, limit}) ->
     if initial
       items = _clone initial
       if _isArray(items) and initialSortFn
@@ -194,7 +195,7 @@ module.exports = class Exoid
           items.splice existingIndex, 1
         else
           items = items.concat [change.newVal]
-    return items
+    return if limit then _takeRight items, limit else items
 
   _replaySubjectFromIo: (io, eventName) =>
     unless @_listeners[eventName].replaySubject
