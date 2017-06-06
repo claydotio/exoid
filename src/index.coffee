@@ -65,6 +65,7 @@ module.exports = class Exoid
       @_cache[key] ?= {}
       @_cache[key].dataStreams = dataStreams
       @_cache[key].dataStream = dataStreams.switch()
+
       @_updateDataCacheStream()
 
     if combinedStream and not @_cache[key]?.combinedStream
@@ -111,7 +112,10 @@ module.exports = class Exoid
           @io.off batchId, onBatch
 
         if isErrorable and error?
-          res.onError error
+          # TODO: (hacky) this should use .onError. It has a weird bug where it
+          # repeatedly errors though...
+          res.onNext {error}
+          res.onCompleted()
         else if not error?
           res.onNext result
           res.onCompleted()
@@ -166,18 +170,13 @@ module.exports = class Exoid
     , null
     .shareReplay 1
 
-    # TODO: does this have bad side-effects? yes: .catch is broken because of it
-    # setTimeout seems to fix it
-
     # if stream gets to 0 subscribers, the next subscriber starts over
     # from scratch and we lose all the progress of the .scan.
     # This is because shareReplay (and any subject) will disconnect when it
     # hits 0 and reconnect. The supposed solution is "autoconnect", I think,
     # but it's not in rxjs at the moment: http://stackoverflow.com/a/36118469
-    setTimeout =>
-      @_listeners[streamId].combinedDisposable = combinedStream.subscribe ->
-        null
-    , 0
+    @_listeners[streamId].combinedDisposable = combinedStream.subscribe ->
+      null
 
     combinedStream
 
@@ -251,6 +250,12 @@ module.exports = class Exoid
       }
 
     @_cache[key]?.combinedStream
+    # TODO: (hacky) this should use .onError. It has a weird bug where it
+    # repeatedly errors though...
+    .map (result) ->
+      if result?.error
+        throw new Error JSON.stringify result?.error
+      result
 
   call: (path, body) =>
     req = {path, body}
