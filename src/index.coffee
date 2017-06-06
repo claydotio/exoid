@@ -167,14 +167,18 @@ module.exports = class Exoid
     , null
     .shareReplay 1
 
-    # TODO: does this have bad side-effects?
+    # TODO: does this have bad side-effects? yes: .catch is broken because of it
+    # setTimeout seems to fix it
+
     # if stream gets to 0 subscribers, the next subscriber starts over
     # from scratch and we lose all the progress of the .scan.
     # This is because shareReplay (and any subject) will disconnect when it
     # hits 0 and reconnect. The supposed solution is "autoconnect", I think,
     # but it's not in rxjs at the moment: http://stackoverflow.com/a/36118469
-    @_listeners[streamId].combinedDisposable = combinedStream.subscribe ->
-      null
+    setTimeout =>
+      @_listeners[streamId].combinedDisposable = combinedStream.subscribe ->
+        null
+    , 0
 
     combinedStream
 
