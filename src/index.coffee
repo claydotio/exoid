@@ -111,8 +111,7 @@ module.exports = class Exoid
           @io.off batchId, onBatch
 
         if isErrorable and error?
-          properError = new Error "#{JSON.stringify error}"
-          res.onError _defaults properError, error
+          res.onError error
         else if not error?
           res.onNext result
           res.onCompleted()
