@@ -253,7 +253,7 @@ module.exports = class Exoid
     # TODO: (hacky) this should use .onError. It has a weird bug where it
     # repeatedly errors though...
     .map (result) ->
-      if result?.error
+      if result?.error and window?
         throw new Error JSON.stringify result?.error
       result
 
