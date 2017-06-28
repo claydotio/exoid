@@ -262,6 +262,8 @@ module.exports = class Exoid
 
     stream = @_batchRequest req, {isErrorable: true}
     return stream.take(1).toPromise().then (result) ->
+      if result?.error and window?
+        throw new Error JSON.stringify result?.error
       return result
 
   invalidateAll: (streamsOnly = false) =>
