@@ -219,6 +219,10 @@ module.exports = class Exoid
 
     @_cache[key].dataStream
 
+  setDataCache: (req, data) ->
+    key = stringify req
+    @_cacheSet key, {dataStream: Rx.Observable.just data}
+
   getCached: (path, body) =>
     req = {path, body}
     key = stringify req
