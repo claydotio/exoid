@@ -48,7 +48,8 @@ module.exports = class Exoid
     .map (pairs) ->
       _transform pairs, (cache, [key, val]) ->
         # ignore if the request hasn't finished yet (esp for server-side render)
-        if val isnt null
+        # don't use null since some reqs return null
+        if val isnt undefined
           cache[key] = val
       , {}
 
@@ -60,7 +61,7 @@ module.exports = class Exoid
     if dataStream and not @_cache[key]?.dataStream
       # https://github.com/claydotio/exoid/commit/fc26eb830910b6567d50e15063ec7544e2ccfedc
       dataStreams = if @isServerSide \
-                    then new Rx.BehaviorSubject(Rx.Observable.just null)
+                    then new Rx.BehaviorSubject(Rx.Observable.just undefined)
                     else new Rx.ReplaySubject 1
       @_cache[key] ?= {}
       @_cache[key].dataStreams = dataStreams
