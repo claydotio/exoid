@@ -14,7 +14,7 @@ _forEach = require 'lodash/forEach'
 _findIndex = require 'lodash/findIndex'
 _takeRight = require 'lodash/takeRight'
 _keys = require 'lodash/keys'
-Rx = require 'rx-lite'
+Rx = require 'rxjs'
 log = require 'loga'
 stringify = require 'json-stable-stringify'
 uuid = require 'node-uuid'
@@ -29,13 +29,13 @@ module.exports = class Exoid
     @_consumeTimeout = null
 
     @dataCacheStreams = new Rx.ReplaySubject 1
-    @dataCacheStreams.onNext Rx.Observable.just cache
+    @dataCacheStreams.next Rx.Observable.of cache
     @dataCacheStream = @dataCacheStreams.switch()
 
     @io.on 'reconnect', => @invalidateAll true
 
     _map cache, (result, key) =>
-      @_cacheSet key, {dataStream: Rx.Observable.just result}
+      @_cacheSet key, {dataStream: Rx.Observable.of result}
 
   _updateDataCacheStream: =>
     dataStreamsArray = _map(@_cache, ({dataStream}, key) ->
@@ -53,7 +53,7 @@ module.exports = class Exoid
           cache[key] = val
       , {}
 
-    @dataCacheStreams.onNext stream
+    @dataCacheStreams.next stream
 
   getCacheStream: => @dataCacheStream
 
@@ -61,7 +61,7 @@ module.exports = class Exoid
     if dataStream and not @_cache[key]?.dataStream
       # https://github.com/claydotio/exoid/commit/fc26eb830910b6567d50e15063ec7544e2ccfedc
       dataStreams = if @isServerSide \
-                    then new Rx.BehaviorSubject(Rx.Observable.just undefined)
+                    then new Rx.BehaviorSubject(Rx.Observable.of undefined)
                     else new Rx.ReplaySubject 1
       @_cache[key] ?= {}
       @_cache[key].dataStreams = dataStreams
@@ -77,10 +77,10 @@ module.exports = class Exoid
       @_cache[key].combinedStream = combinedStreams.switch()
 
     if dataStream
-      @_cache[key].dataStreams.onNext dataStream
+      @_cache[key].dataStreams.next dataStream
 
     if combinedStream
-      @_cache[key].combinedStreams.onNext combinedStream
+      @_cache[key].combinedStreams.next combinedStream
 
   _batchRequest: (req, {isErrorable, streamId} = {}) =>
     streamId ?= uuid.v4()
@@ -115,11 +115,11 @@ module.exports = class Exoid
         if isErrorable and error?
           # TODO: (hacky) this should use .onError. It has a weird bug where it
           # repeatedly errors though...
-          res.onNext {error}
-          res.onCompleted()
+          res.next {error}
+          res.complete()
         else if not error?
-          res.onNext result
-          res.onCompleted()
+          res.next result
+          res.complete()
         else
           log.error error
 
@@ -152,7 +152,7 @@ module.exports = class Exoid
     additionalDataStream = if streamId and options.isStreamed \
                            then @_replaySubjectFromIo @io, streamId
                            else new Rx.ReplaySubject 0
-    clientChangesStream ?= Rx.Observable.just null
+    clientChangesStream ?= Rx.Observable.of null
     changesStream = Rx.Observable.merge(
       additionalDataStream, clientChangesStream
     )
@@ -169,11 +169,12 @@ module.exports = class Exoid
         changes: update?.changes
       }, {initialSortFn, limit}
     , null
-    .shareReplay 1
+    .publishReplay().refCount() 1
 
     # if stream gets to 0 subscribers, the next subscriber starts over
     # from scratch and we lose all the progress of the .scan.
-    # This is because shareReplay (and any subject) will disconnect when it
+    # This is because publishReplay().refCount() (and any subject)
+    # will disconnect when it
     # hits 0 and reconnect. The supposed solution is "autoconnect", I think,
     # but it's not in rxjs at the moment: http://stackoverflow.com/a/36118469
     @_listeners[streamId].combinedDisposable = combinedStream.subscribe ->
@@ -204,7 +205,7 @@ module.exports = class Exoid
     unless @_listeners[eventName].replaySubject
       replaySubject = new Rx.ReplaySubject 0
       ioListener = (data) ->
-        replaySubject.onNext data
+        replaySubject.next data
       io.on eventName, ioListener
       @_listeners[eventName].replaySubject = replaySubject
       @_listeners[eventName].ioListener = ioListener
@@ -222,7 +223,7 @@ module.exports = class Exoid
 
   setDataCache: (req, data) ->
     key = stringify req
-    @_cacheSet key, {dataStream: Rx.Observable.just data}
+    @_cacheSet key, {dataStream: Rx.Observable.of data}
 
   getCached: (path, body) =>
     req = {path, body}
@@ -274,7 +275,7 @@ module.exports = class Exoid
   invalidateAll: (streamsOnly = false) =>
     _map @_listeners, (listener, streamId) =>
       @io.off streamId, listener?.ioListener
-      listener.combinedDisposable?.dispose()
+      listener.combinedDisposable?.unsubscribe()
     @_listeners = {}
 
     if streamsOnly
@@ -286,8 +287,8 @@ module.exports = class Exoid
       if not combinedStreams or not combinedStreams.hasObservers()
         return false
       req = JSON.parse key
-      dataStreams.onNext @_batchRequest req, options
-      combinedStreams.onNext @_combinedRequestStream req, options
+      dataStreams.next @_batchRequest req, options
+      combinedStreams.next @_combinedRequestStream req, options
       cache
     ), (val) -> val
     return null
@@ -300,6 +301,6 @@ module.exports = class Exoid
       {dataStreams, combinedStreams, options} = cache
       req = JSON.parse cacheKey
       if req.path is path and _isUndefined(body) or cacheKey is key
-        dataStreams.onNext @_batchRequest req, options
-        combinedStreams.onNext @_combinedRequestStream req, options
+        dataStreams.next @_batchRequest req, options
+        combinedStreams.next @_combinedRequestStream req, options
     return null

@@ -26,7 +26,7 @@
     "lodash": "^4.17.2",
     "loga": "^0.1.1",
     "node-uuid": "^1.4.7",
-    "rx-lite": "^4.0.8"
+    "rxjs": "^5.4.3"
   },
   "devDependencies": {
     "b-assert": "^0.1.2",
