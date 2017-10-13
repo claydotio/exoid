@@ -169,7 +169,7 @@ module.exports = class Exoid
         changes: update?.changes
       }, {initialSortFn, limit}
     , null
-    .publishReplay().refCount() 1
+    .publishReplay(1).refCount()
 
     # if stream gets to 0 subscribers, the next subscriber starts over
     # from scratch and we lose all the progress of the .scan.
