@@ -238,7 +238,7 @@ module.exports = class Exoid
     req = {path, body}
     key = stringify req
 
-    unless @_cache[key]?.combinedStream
+    if not @_cache[key]?.combinedStream or options.ignoreCache
       streamId = uuid.v4()
       options = _defaults options, {
         streamId
