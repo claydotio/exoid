@@ -14,10 +14,23 @@ _forEach = require 'lodash/forEach'
 _findIndex = require 'lodash/findIndex'
 _takeRight = require 'lodash/takeRight'
 _keys = require 'lodash/keys'
-Rx = require 'rxjs'
 log = require 'loga'
 stringify = require 'json-stable-stringify'
 uuid = require 'node-uuid'
+RxAsyncSubject = require('rxjs/AsyncSubject').AsyncSubject
+RxBehaviorSubject = require('rxjs/BehaviorSubject').BehaviorSubject
+RxReplaySubject = require('rxjs/ReplaySubject').ReplaySubject
+RxObservable = require('rxjs/Observable').Observable
+require 'rxjs/observable/of'
+require 'rxjs/observable/combineLatest'
+require 'rxjs/observable/merge'
+# doesn't seem to work properly. https://github.com/ReactiveX/rxjs/issues/2554
+# require 'rxjs/operator/scan'
+scan = require('rxjs/operator/scan').scan
+RxObservable.prototype.scan = scan
+# require 'rxjs/operator/publishReplay'
+publishReplay = require('rxjs/operator/publishReplay').publishReplay
+RxObservable.prototype.publishReplay = publishReplay
 
 module.exports = class Exoid
   constructor: ({@api, cache, @ioEmit, @io, @isServerSide}) ->
@@ -28,21 +41,21 @@ module.exports = class Exoid
     @_listeners = {}
     @_consumeTimeout = null
 
-    @dataCacheStreams = new Rx.ReplaySubject 1
-    @dataCacheStreams.next Rx.Observable.of cache
+    @dataCacheStreams = new RxReplaySubject 1
+    @dataCacheStreams.next RxObservable.of cache
     @dataCacheStream = @dataCacheStreams.switch()
 
     @io.on 'reconnect', => @invalidateAll true
 
     _map cache, (result, key) =>
-      @_cacheSet key, {dataStream: Rx.Observable.of result}
+      @_cacheSet key, {dataStream: RxObservable.of result}
 
   _updateDataCacheStream: =>
     dataStreamsArray = _map(@_cache, ({dataStream}, key) ->
       dataStream.map (value) ->
         [key, value]
     )
-    stream = Rx.Observable.combineLatest.apply this, dataStreamsArray.concat [
+    stream = RxObservable.combineLatest.apply this, dataStreamsArray.concat [
       (vals...) -> vals
     ]
     .map (pairs) ->
@@ -61,8 +74,8 @@ module.exports = class Exoid
     if dataStream and not @_cache[key]?.dataStream
       # https://github.com/claydotio/exoid/commit/fc26eb830910b6567d50e15063ec7544e2ccfedc
       dataStreams = if @isServerSide \
-                    then new Rx.BehaviorSubject(Rx.Observable.of undefined)
-                    else new Rx.ReplaySubject 1
+                    then new RxBehaviorSubject(RxObservable.of undefined)
+                    else new RxReplaySubject 1
       @_cache[key] ?= {}
       @_cache[key].dataStreams = dataStreams
       @_cache[key].dataStream = dataStreams.switch()
@@ -70,7 +83,7 @@ module.exports = class Exoid
       @_updateDataCacheStream()
 
     if combinedStream and not @_cache[key]?.combinedStream
-      combinedStreams = new Rx.ReplaySubject 1
+      combinedStreams = new RxReplaySubject 1
       @_cache[key] ?= {}
       @_cache[key].options = options
       @_cache[key].combinedStreams = combinedStreams
@@ -88,7 +101,7 @@ module.exports = class Exoid
     unless @_consumeTimeout
       @_consumeTimeout = setTimeout @_consumeBatchQueue
 
-    res = new Rx.AsyncSubject()
+    res = new RxAsyncSubject()
     @_batchQueue.push {req, res, isErrorable, streamId}
     res
 
@@ -151,15 +164,15 @@ module.exports = class Exoid
     }
     additionalDataStream = if streamId and options.isStreamed \
                            then @_replaySubjectFromIo @io, streamId
-                           else new Rx.ReplaySubject 0
-    clientChangesStream ?= Rx.Observable.of null
-    changesStream = Rx.Observable.merge(
+                           else new RxReplaySubject 0
+    clientChangesStream ?= RxObservable.of null
+    changesStream = RxObservable.merge(
       additionalDataStream, clientChangesStream
     )
 
     # ideally we'd use concat here instead, but initialDataStream is
     # a switch observable because of cache
-    combinedStream = Rx.Observable.merge(
+    combinedStream = RxObservable.merge(
       initialDataStream, changesStream
     )
     .scan (items, update) =>
@@ -203,7 +216,7 @@ module.exports = class Exoid
 
   _replaySubjectFromIo: (io, eventName) =>
     unless @_listeners[eventName].replaySubject
-      replaySubject = new Rx.ReplaySubject 0
+      replaySubject = new RxReplaySubject 0
       ioListener = (data) ->
         replaySubject.next data
       io.on eventName, ioListener
@@ -223,7 +236,7 @@ module.exports = class Exoid
 
   setDataCache: (req, data) ->
     key = stringify req
-    @_cacheSet key, {dataStream: Rx.Observable.of data}
+    @_cacheSet key, {dataStream: RxObservable.of data}
 
   getCached: (path, body) =>
     req = {path, body}
@@ -245,7 +258,7 @@ module.exports = class Exoid
         isErrorable: false
       }
       clientChangesStream = options.clientChangesStream
-      clientChangesStream ?= new Rx.ReplaySubject 0
+      clientChangesStream ?= new RxReplaySubject 0
       clientChangesStream = clientChangesStream.map (change) ->
         {initial: null, changes: [{newVal: change}], isClient: true}
       options.clientChangesStream = clientChangesStream
