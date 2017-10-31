@@ -23,8 +23,18 @@ RxReplaySubject = require('rxjs/ReplaySubject').ReplaySubject
 RxObservable = require('rxjs/Observable').Observable
 require 'rxjs/observable/of'
 require 'rxjs/observable/combineLatest'
+require 'rxjs/observable/concat'
 require 'rxjs/observable/merge'
-# doesn't seem to work properly. https://github.com/ReactiveX/rxjs/issues/2554
+require 'rxjs/operator/switch'
+# require 'rxjs/operator/take' # doesn't work for some reason
+take = require('rxjs/operator/take').take
+RxObservable.prototype.take = take
+# require 'rxjs/operator/map'
+map = require('rxjs/operator/map').map
+RxObservable.prototype.map = map
+# require 'rxjs/operator/toPromise'
+toPromise = require('rxjs/operator/toPromise').toPromise
+RxObservable.prototype.toPromise = toPromise
 # require 'rxjs/operator/scan'
 scan = require('rxjs/operator/scan').scan
 RxObservable.prototype.scan = scan
