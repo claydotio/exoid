@@ -307,6 +307,14 @@ module.exports = class Exoid
 
     @_cache = _pickBy _mapValues(@_cache, (cache, key) =>
       {dataStreams, combinedStreams, options} = cache
+
+      # without this, after invalidating, the stream is just the clientChanges
+      # for a split second (eg chat in starfire just shows the messages you
+      # posted for a flash until the rest reload in). this is kind of hacky
+      # since it's a prop on the object, the observable gets completed replaced
+      # in the model too
+      options.clientChangesStream = new RxReplaySubject 0
+
       if not combinedStreams or combinedStreams.observers.length is 0
         return false
       req = JSON.parse key
