@@ -313,7 +313,7 @@ module.exports = class Exoid
       # posted for a flash until the rest reload in). this is kind of hacky
       # since it's a prop on the object, the observable gets completed replaced
       # in the model too
-      options.clientChangesStream = new RxReplaySubject 0
+      options?.clientChangesStream = new RxReplaySubject 0
 
       if not combinedStreams or combinedStreams.observers.length is 0
         return false
