@@ -25,8 +25,8 @@
     "json-stable-stringify": "^1.0.0",
     "lodash": "^4.17.2",
     "loga": "^0.1.1",
-    "node-uuid": "^1.4.7",
-    "rxjs": "^5.4.3"
+    "rxjs": "^5.4.3",
+    "uuid": "^3.1.0"
   },
   "devDependencies": {
     "b-assert": "^0.1.2",
