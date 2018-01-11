@@ -331,7 +331,14 @@ module.exports = class Exoid
     _map @_cache, (cache, cacheKey) =>
       {dataStreams, combinedStreams, options} = cache
       req = JSON.parse cacheKey
+
       if req.path is path and _isUndefined(body) or cacheKey is key
+        listener = @_listeners[options.streamId]
+        listener.combinedDisposable?.unsubscribe()
+        delete @_listeners[options.streamId]
+        @io.off options.streamId
+
         dataStreams.next @_batchRequest req, options
         combinedStreams.next @_combinedRequestStream req, options
+
     return null
