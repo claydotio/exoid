@@ -14,6 +14,7 @@ _forEach = require 'lodash/forEach'
 _findIndex = require 'lodash/findIndex'
 _takeRight = require 'lodash/takeRight'
 _keys = require 'lodash/keys'
+_debounce = require 'lodash/debounce'
 log = require 'loga'
 stringify = require 'json-stable-stringify'
 uuid = require 'uuid'
@@ -54,6 +55,8 @@ module.exports = class Exoid
     @dataCacheStreams = new RxReplaySubject 1
     @dataCacheStreams.next RxObservable.of cache
     @dataCacheStream = @dataCacheStreams.switch()
+    # simulataneous invalidateAlls seem to break streams
+    @invalidateAll = _debounce @_invalidateAll, 0, {trailing: true}
 
     @io.on 'reconnect', => @invalidateAll true
 
@@ -295,7 +298,8 @@ module.exports = class Exoid
         throw new Error JSON.stringify result?.error
       return result
 
-  invalidateAll: (streamsOnly = false) =>
+  # deobunced in constructor
+  _invalidateAll: (streamsOnly = false) =>
     _map @_listeners, (listener, streamId) =>
       @io.off streamId, listener?.ioListener
       listener.combinedDisposable?.unsubscribe()
