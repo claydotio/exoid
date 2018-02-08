@@ -298,12 +298,15 @@ module.exports = class Exoid
         throw new Error JSON.stringify result?.error
       return result
 
-  # deobunced in constructor
-  _invalidateAll: (streamsOnly = false) =>
+  disposeAll: =>
     _map @_listeners, (listener, streamId) =>
       @io.off streamId, listener?.ioListener
       listener.combinedDisposable?.unsubscribe()
     @_listeners = {}
+
+  # deobunced in constructor
+  _invalidateAll: (streamsOnly = false) =>
+    @disposeAll()
 
     if streamsOnly
       @_cache = _pickBy @_cache, (cache, key) ->
