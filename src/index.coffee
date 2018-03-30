@@ -22,11 +22,11 @@ RxAsyncSubject = require('rxjs/AsyncSubject').AsyncSubject
 RxBehaviorSubject = require('rxjs/BehaviorSubject').BehaviorSubject
 RxReplaySubject = require('rxjs/ReplaySubject').ReplaySubject
 RxObservable = require('rxjs/Observable').Observable
-require 'rxjs/observable/of'
-require 'rxjs/observable/combineLatest'
-require 'rxjs/observable/concat'
-require 'rxjs/observable/merge'
-require 'rxjs/operator/switch'
+require 'rxjs/add/observable/of'
+require 'rxjs/add/observable/combineLatest'
+require 'rxjs/add/observable/concat'
+require 'rxjs/add/observable/merge'
+require 'rxjs/add/operator/switch'
 # require 'rxjs/operator/take' # doesn't work for some reason
 take = require('rxjs/operator/take').take
 RxObservable.prototype.take = take
