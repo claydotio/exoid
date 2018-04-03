@@ -217,8 +217,9 @@ module.exports = class Exoid
       items ?= []
       _forEach changes, (change) ->
         existingIndex = change.oldId and
-                        _findIndex(items, {id: change.oldId}) or
-                        _findIndex(items, {clientId: change.newVal?.clientId})
+                        _findIndex(items, {id: change.oldId})
+        if not existingIndex? or existingIndex is -1
+          existingIndex = _findIndex(items, {clientId: change.newVal?.clientId})
         if existingIndex? and existingIndex isnt -1 and change.newVal
           items.splice existingIndex, 1, change.newVal
         else if existingIndex? and existingIndex isnt -1
