@@ -84,29 +84,32 @@ module.exports = class Exoid
   getCacheStream: => @dataCacheStream
 
   _cacheSet: (key, {combinedStream, dataStream, options}) =>
-    if dataStream and not @_cache[key]?.dataStream
+    valueToCache = if options?.ignoreCache then {} else @_cache[key] or {}
+    if dataStream and not valueToCache?.dataStream
       # https://github.com/claydotio/exoid/commit/fc26eb830910b6567d50e15063ec7544e2ccfedc
       dataStreams = if @isServerSide \
                     then new RxBehaviorSubject(RxObservable.of undefined)
                     else new RxReplaySubject 1
-      @_cache[key] ?= {}
-      @_cache[key].dataStreams = dataStreams
-      @_cache[key].dataStream = dataStreams.switch()
+      valueToCache.dataStreams = dataStreams
+      valueToCache.dataStream = dataStreams.switch()
 
-      @_updateDataCacheStream()
-
-    if combinedStream and not @_cache[key]?.combinedStream
+    if combinedStream and not valueToCache?.combinedStream
       combinedStreams = new RxReplaySubject 1
-      @_cache[key] ?= {}
-      @_cache[key].options = options
-      @_cache[key].combinedStreams = combinedStreams
-      @_cache[key].combinedStream = combinedStreams.switch()
+      valueToCache.options = options
+      valueToCache.combinedStreams = combinedStreams
+      valueToCache.combinedStream = combinedStreams.switch()
 
     if dataStream
-      @_cache[key].dataStreams.next dataStream
+      valueToCache.dataStreams.next dataStream
 
     if combinedStream
-      @_cache[key].combinedStreams.next combinedStream
+      valueToCache.combinedStreams.next combinedStream
+
+    unless options?.ignoreCache
+      @_cache[key] = valueToCache
+      @_updateDataCacheStream()
+
+    valueToCache
 
   _batchRequest: (req, {isErrorable, streamId} = {}) =>
     streamId ?= uuid.v4()
@@ -240,16 +243,20 @@ module.exports = class Exoid
 
   _initialDataRequest: (req, {isErrorable, streamId, ignoreCache}) =>
     key = stringify req
-    if not @_cache[key]?.dataStream or ignoreCache
+    cachedValue = @_cache[key]
+    if not cachedValue?.dataStream or ignoreCache
       # should only be caching the actual async result and nothing more, since
       # that's all we can really get from server -> client rendering with
       # json.stringify
-      @_cacheSet key, {dataStream: @_batchRequest(req, {isErrorable, streamId})}
+      cachedValue = @_cacheSet key, {
+        dataStream: @_batchRequest(req, {isErrorable, streamId})
+        options: {ignoreCache}
+      }
 
-    @_cache[key].dataStream
+    cachedValue.dataStream
 
   setDataCache: (req, data) ->
-    key = stringify req
+    key = if typeof req is 'string' then req else stringify req
     @_cacheSet key, {dataStream: RxObservable.of data}
 
   getCached: (path, body) =>
@@ -265,7 +272,9 @@ module.exports = class Exoid
     req = {path, body}
     key = stringify req
 
-    if not @_cache[key]?.combinedStream or options.ignoreCache
+    cachedValue = @_cache[key]
+
+    if not cachedValue?.combinedStream or options.ignoreCache
       streamId = uuid.v4()
       options = _defaults options, {
         streamId
@@ -277,12 +286,12 @@ module.exports = class Exoid
         {initial: null, changes: [{newVal: change}], isClient: true}
       options.clientChangesStream = clientChangesStream
 
-      @_cacheSet key, {
+      cachedValue = @_cacheSet key, {
         options
         combinedStream: @_combinedRequestStream req, options
       }
 
-    @_cache[key]?.combinedStream
+    cachedValue?.combinedStream
     # TODO: (hacky) this should use .onError. It has a weird bug where it
     # repeatedly errors though...
     .map (result) ->
