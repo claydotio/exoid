@@ -44,8 +44,9 @@ publishReplay = require('rxjs/operator/publishReplay').publishReplay
 RxObservable.prototype.publishReplay = publishReplay
 
 module.exports = class Exoid
-  constructor: ({@api, cache, @ioEmit, @io, @isServerSide}) ->
+  constructor: ({@api, cache, @ioEmit, @io, @isServerSide, @allowInvalidation}) ->
     cache ?= {}
+    @allowInvalidation ?= true
 
     @_cache = {}
     @_batchQueue = []
@@ -62,6 +63,12 @@ module.exports = class Exoid
 
     _map cache, (result, key) =>
       @_cacheSet key, {dataStream: RxObservable.of result}
+
+  disableInvalidation: =>
+    @allowInvalidation = false
+
+  enableInvalidation: =>
+    @allowInvalidation = true
 
   _updateDataCacheStream: =>
     dataStreamsArray = _map(@_cache, ({dataStream}, key) ->
@@ -316,6 +323,9 @@ module.exports = class Exoid
 
   # deobunced in constructor
   _invalidateAll: (streamsOnly = false) =>
+    unless @allowInvalidation
+      return
+
     @disposeAll()
 
     if streamsOnly
@@ -342,6 +352,9 @@ module.exports = class Exoid
     return null
 
   invalidate: (path, body) =>
+    unless @allowInvalidation
+      return
+
     req = {path, body}
     key = stringify req
 
