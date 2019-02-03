@@ -248,6 +248,16 @@ module.exports = class Exoid
       @_listeners[eventName].ioListener = ioListener
     @_listeners[eventName].replaySubject
 
+  _behaviorSubjectFromIo: (io, eventName) =>
+    unless @_listeners[eventName].behaviorSubject
+      behaviorSubject = new RxBehaviorSubject 0
+      ioListener = (data) ->
+        behaviorSubject.next data
+      io.on eventName, ioListener
+      @_listeners[eventName].behaviorSubject = behaviorSubject
+      @_listeners[eventName].ioListener = ioListener
+    @_listeners[eventName].behaviorSubject
+
   _initialDataRequest: (req, {isErrorable, streamId, ignoreCache}) =>
     key = stringify req
     cachedValue = @_cache[key]
@@ -306,10 +316,17 @@ module.exports = class Exoid
         throw new Error JSON.stringify result?.error
       result
 
-  call: (path, body) =>
+  call: (path, body, {additionalDataStream} = {}) =>
     req = {path, body}
 
-    stream = @_batchRequest req, {isErrorable: true}
+    streamId = uuid.v4()
+
+    if additionalDataStream
+      @_listeners[streamId] = {}
+      additionalDataStream.next @_behaviorSubjectFromIo @io, streamId
+
+    stream = @_batchRequest req, {isErrorable: true, streamId}
+
     return stream.take(1).toPromise().then (result) ->
       if result?.error and window?
         throw new Error JSON.stringify result?.error
