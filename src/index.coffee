@@ -248,15 +248,12 @@ module.exports = class Exoid
       @_listeners[eventName].ioListener = ioListener
     @_listeners[eventName].replaySubject
 
-  _behaviorSubjectFromIo: (io, eventName) =>
-    unless @_listeners[eventName].behaviorSubject
-      behaviorSubject = new RxBehaviorSubject 0
-      ioListener = (data) ->
-        behaviorSubject.next data
-      io.on eventName, ioListener
-      @_listeners[eventName].behaviorSubject = behaviorSubject
-      @_listeners[eventName].ioListener = ioListener
-    @_listeners[eventName].behaviorSubject
+  _streamFromIo: (io, eventName) =>
+    RxObservable.create (observer) =>
+      io.on eventName, (data) ->
+        observer.next data
+      ->
+        io.off eventName
 
   _initialDataRequest: (req, {isErrorable, streamId, ignoreCache}) =>
     key = stringify req
@@ -322,8 +319,7 @@ module.exports = class Exoid
     streamId = uuid.v4()
 
     if additionalDataStream
-      @_listeners[streamId] = {}
-      additionalDataStream.next @_behaviorSubjectFromIo @io, streamId
+      additionalDataStream.next @_streamFromIo @io, streamId
 
     stream = @_batchRequest req, {isErrorable: true, streamId}
 
