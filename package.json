@@ -1,6 +1,6 @@
 {
   "name": "exoid",
-  "version": "0.1.7",
+  "version": "1.0.0",
   "description": "Scaffolding for isomorphic coffeescript libraries",
   "keywords": [
     "isomorphic",
@@ -21,7 +21,6 @@
   "author": "Zolmeister (https://zolmeister.com/)",
   "dependencies": {
     "clay-request": "git://github.com/claydotio/clay-request.git",
-    "coffee-script": "^1.9.3",
     "json-stable-stringify": "^1.0.0",
     "lodash": "^4.17.2",
     "loga": "^0.1.1",
@@ -32,6 +31,7 @@
     "b-assert": "^0.1.2",
     "clay-coffeescript-style-guide": "^1.1.0",
     "coffee-loader": "^0.7.2",
+    "coffeescript": "^2.5.1",
     "gulp": "^3.9.0",
     "gulp-coffee-istanbul": "^0.7.1",
     "gulp-coffeelint": "^0.5.0",

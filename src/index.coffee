@@ -95,7 +95,7 @@ module.exports = class Exoid
     if dataStream and not valueToCache?.dataStream
       # https://github.com/claydotio/exoid/commit/fc26eb830910b6567d50e15063ec7544e2ccfedc
       dataStreams = if @isServerSide \
-                    then new RxBehaviorSubject(RxObservable.of undefined)
+                    then new RxBehaviorSubject(RxObservable.of undefined) \
                     else new RxReplaySubject 1
       valueToCache.dataStreams = dataStreams
       valueToCache.dataStream = dataStreams.switch()
@@ -186,7 +186,7 @@ module.exports = class Exoid
       isErrorable, streamId, ignoreCache
     }
     additionalDataStream = if streamId and options.isStreamed \
-                           then @_replaySubjectFromIo @io, streamId
+                           then @_replaySubjectFromIo @io, streamId \
                            else new RxReplaySubject 0
     clientChangesStream ?= RxObservable.of null
     changesStream = RxObservable.merge(
