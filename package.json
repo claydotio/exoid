@@ -22,9 +22,8 @@
   "dependencies": {
     "clay-request": "git://github.com/claydotio/clay-request.git",
     "json-stable-stringify": "^1.0.0",
-    "lodash": "^4.17.2",
-    "loga": "^0.1.1",
-    "rxjs": "^5.4.3",
+    "lodash-es": "^4.17.15",
+    "rxjs": "^7.0.0-beta.0",
     "uuid": "^3.1.0"
   },
   "devDependencies": {
