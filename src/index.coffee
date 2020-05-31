@@ -8,6 +8,7 @@ import uuid from 'uuid'
 export default class Exoid
   constructor: ({@api, cache, @ioEmit, @io, @isServerSide, @allowInvalidation}) ->
     cache ?= {}
+    @synchronousCache = cache
     @allowInvalidation ?= true
 
     @_cache = {}
@@ -31,6 +32,10 @@ export default class Exoid
 
   enableInvalidation: =>
     @allowInvalidation = true
+
+  # for ssr since it's synchronous 1 render atm (can't use getCacheStream)
+  setSynchronousCache: (@synchronousCache) => null
+  getSynchronousCache: => @synchronousCache
 
   _updateDataCacheStream: =>
     dataStreamsArray = _.map(@_cache, ({dataStream}, key) ->
