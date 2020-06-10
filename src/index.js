@@ -277,7 +277,7 @@ export default class Exoid {
   }
 
   _streamFromIo (io, eventName) {
-    return Rx.create(observer => {
+    return new Rx.Observable(observer => {
       io.on(eventName, data => observer.next(data))
       return () => io.off(eventName)
     })
