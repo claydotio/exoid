@@ -30,7 +30,7 @@
   "devDependencies": {
     "b-assert": "^0.1.2",
     "clay-coffeescript-style-guide": "^1.1.0",
-    "coffee-loader": "^0.7.2",
+    "coffee-loader": "^4.0.0",
     "coffeescript": "^2.5.1",
     "gulp": "^3.9.0",
     "gulp-coffee-istanbul": "^0.7.1",
